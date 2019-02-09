@@ -118,49 +118,47 @@ class Cell:
         )
 
     def drag(self, vector: Vector) -> None:
-        self.__drag_cell(self, vector, [], 0)
+        self.__drag_cell([self], vector, [])
 
     def __drag_cell(
             self,
-            cell: 'Cell',
+            cells: List['Cell'],
             vector: Vector,
-            affected: List[int],
-            depth: int
+            affected: List[Point],
     ) -> None:
         if vector.f <= 1:
             return
 
-        drags: List[Vector] = []
-        for point in cell.points:
-            drag = self.__peak(vector, point, cell.center)
-            drag = self.__stretch(drag, point, cell.center)
-            drags.append(drag)
-
-        for i, point in enumerate(cell.points):
-            if point in affected:
+        for cell in cells:
+            if cell.center in affected:
                 continue
 
-            point.move(drags[i])
+            cell.center.move(vector)
+            affected.append(cell.center)
 
-        cell.center.move(vector)
+            drags: List[Vector] = []
+            for point in cell.points:
+                drag = vector
+                drag = self.__stretch(drag, point, cell.center)
+                drag = self.__peak(drag, point, cell.center)
+                drags.append(drag)
 
-        for point in [cell.center] + cell.points:
-            affected.append(point)
+            for i, point in enumerate(cell.points):
+                if point in affected:
+                    continue
 
-        if depth > 1:
-            return
+                point.move(drags[i])
+                affected.append(point)
 
-        # TODO first neighbors and then deep
-        for connection in cell.connections:
-            if connection.center in affected:
-                continue
-
-            self.__drag_cell(
-                connection,
-                vector // 2,
-                affected,
-                depth + 1
-            )
+        self.__drag_cell(
+            [
+                connection
+                for cell in cells
+                for connection in cell.connections
+            ],
+            vector // 2,
+            affected,
+        )
 
     def __stretch(self, vector: Vector, point: Point, center: Point) -> Vector:
         def calc(vector: int, point: int, center: int) -> int:
