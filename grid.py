@@ -1,6 +1,30 @@
 from abc import ABC, abstractmethod
 from math import cos, pi, sin
-from typing import Tuple, List, Any, Dict
+from typing import Any, Dict, List, NamedTuple, Tuple
+
+
+class Vector(NamedTuple):
+    x: int
+    y: int
+    z: int
+
+    @property
+    def f(self) -> int:
+        return abs(self.x) + abs(self.y) + abs(self.z)
+
+    def __floordiv__(self, other: Any) -> 'Vector':
+        return Vector(
+            self.x // other,
+            self.y // other,
+            self.z // other,
+        )
+
+    def __truediv__(self, other: Any) -> 'Vector':
+        return Vector(
+            self.x / other,
+            self.y / other,
+            self.z / other,
+        )
 
 
 class Point:
@@ -14,13 +38,13 @@ class Point:
     def pos(self) -> Tuple[int, int]:
         return self.x, self.y
 
-    def move(self, x: int, y: int, z: int) -> None:
+    def move(self, vector: Vector) -> None:
         if self.locked:
             return
 
-        self.x += x
-        self.y += y
-        self.z += z
+        self.x += vector.x
+        self.y += vector.y
+        self.z += vector.z
 
     def lock(self) -> None:
         self.locked = True
@@ -35,7 +59,7 @@ class Point:
         ])
 
     def __hash__(self) -> int:
-        return self.pos().__hash__()
+        return hash(self.pos())
 
     def __repr__(self) -> str:
         return '<Point: %d,%d,%d>' % (self.x, self.y, self.z)
@@ -45,20 +69,19 @@ class Cell:
 
     @classmethod
     def hex(cls, x: int, y: int, r: int) -> 'Cell':
-        return cls.poly(x, y, r, 6)
-
-    @classmethod
-    def poly(cls, x: int, y: int, r: int, sides: int) -> 'Cell':
+        sides = 6
         angle = 2 * pi / sides
+        edges = [
+            Point(
+                round(x + r * sin(i * angle)),
+                round(y + r * cos(i * angle))
+            )
+            for i in range(sides)
+        ]
+
         return cls(
             Point(x, y),
-            [
-                Point(
-                    round(x + r * sin(i * angle)),
-                    round(y + r * cos(i * angle))
-                )
-                for i in range(sides)
-            ]
+            edges
         )
 
     def __init__(self, center: Point, points: List[Point]) -> None:
@@ -94,44 +117,83 @@ class Cell:
             ]
         )
 
-    def drag(self, x: int, y: int, z: int) -> None:
-        self.__drag_cell(self, x, y, z, [])
+    def drag(self, vector: Vector) -> None:
+        self.__drag_cell(self, vector, [], 0)
 
     def __drag_cell(
             self,
             cell: 'Cell',
-            x: int,
-            y: int,
-            z: int,
-            affected: List[Point]
+            vector: Vector,
+            affected: List[int],
+            depth: int
     ) -> None:
-        if abs(x) <= 1 and abs(y) <= 1:
+        if vector.f <= 1:
             return
 
-        cell.center.move(x, y, z)
-        affected.append(cell.center)
-
+        drags: List[Vector] = []
         for point in cell.points:
-            point.move(
-                self.__stretch(x, point.x, cell.center.x),
-                self.__stretch(y, point.y, cell.center.y),
-                self.__stretch(z, point.z, cell.center.y),
-            )
+            drag = self.__peak(vector, point, cell.center)
+            drag = self.__stretch(drag, point, cell.center)
+            drags.append(drag)
 
+        for i, point in enumerate(cell.points):
+            if point in affected:
+                continue
+
+            point.move(drags[i])
+
+        cell.center.move(vector)
+
+        for point in [cell.center] + cell.points:
+            affected.append(point)
+
+        if depth > 1:
+            return
+
+        # TODO first neighbors and then deep
         for connection in cell.connections:
+            if connection.center in affected:
+                continue
+
             self.__drag_cell(
                 connection,
-                self.__stretch(x, connection.center.x, cell.center.x),
-                self.__stretch(y, connection.center.y, cell.center.y),
-                self.__stretch(z, connection.center.z, cell.center.z),
-                affected
+                vector // 2,
+                affected,
+                depth + 1
             )
 
-    def __stretch(self, x: int, point: int, reference: int) -> int:
-        if x > 0:
-            return x // 4 if point > reference else x // 2
+    def __stretch(self, vector: Vector, point: Point, center: Point) -> Vector:
+        def calc(vector: int, point: int, center: int) -> int:
+            if point < center:
+                return round(vector * 0.5)
+            if point == center:
+                return round(vector * 0.8)
+            return vector
+
+        return Vector(
+            calc(vector.x, point.x, center.x),
+            calc(vector.y, point.y, center.y),
+            vector.z
+        )
+
+    def __peak(self, vector: Vector, point: Point, center: Point) -> Vector:
+        if point.x == center.x:
+            ox = vector.x
+            oy = abs(vector.z) * (-1 if point.y > center.y else 1)
         else:
-            return x // 2 if point > reference else x // 4
+            ox = abs(vector.z) * (-1 if point.x > center.x else 1)
+            oy = abs(vector.z // 2) * (-1 if point.y > center.y else 1)
+
+        if ox > self.width:
+            ox = 0
+        if oy > self.height:
+            oy = 0
+
+        return Vector(
+            vector.x + ox,  # TODO - make it proportional
+            vector.y + oy,  # TODO - make it proportional
+            vector.z
+        )
 
 
 class Shake(ABC):

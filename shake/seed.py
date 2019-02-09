@@ -1,7 +1,7 @@
 from string import digits
 from typing import Generator, Dict
 
-from grid import Shake, Point, Cell
+from grid import Shake, Point, Cell, Vector
 
 
 class Seed:
@@ -29,9 +29,11 @@ class SeedNoise(Shake):
         for cell in cells.values():
             for point in cell.points:
                 point.move(
-                    self.__get(),
-                    self.__get(),
-                    0
+                    Vector(
+                        self.__get(),
+                        self.__get(),
+                        0
+                    )
                 )
 
     def __get(self) -> int:
@@ -46,9 +48,11 @@ class SeedDrag(Shake):
     def apply(self, cells: Dict[Point, Cell]) -> None:
         for cell in cells.values():
             cell.drag(
-                self.__get(),
-                self.__get(),
-                self.__get(),
+                Vector(
+                    self.__get(),
+                    self.__get(),
+                    self.__get(),
+                )
             )
 
     def __get(self) -> int:
