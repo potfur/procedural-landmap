@@ -1,25 +1,25 @@
+from random import randint
+
 from grid import Grid, Vector
-from shake.random import RandomDrag, RandomNoise
-from shake.seed import Seed, SeedDrag, SeedNoise
 from view import View
 
-grid = Grid(5, 10, 40)
-grid.cells[22].drag(Vector(0, 0, +50))
+grid = Grid(5, 5, 40)
 
-# grid.apply(RandomNoise(5))
-# grid.apply(RandomDrag(5))
-
-# seed = Seed('1357943016922984648920275620')
-# grid.apply(SeedNoise(seed))
-# grid.apply(SeedDrag(seed))
+grid.drag(
+    grid.points[1],
+    Vector(
+        randint(-10, 10),
+        randint(-10, 10),
+        randint(-10, 10),
+    )
+)
 
 view = View(grid.width, grid.height)
-for cell in grid.cells:
-    view.cell(cell)
+for point in grid.points:
+    view.connect(point)
 
-for cell in grid.cells:
-    view.text(cell.center, str(cell.center.z))
-    for point in cell.points:
-        view.text(point, str(point.z))
+for point in grid.points:
+    view.point(point, 1)
+    view.text(point, str(point.z))
 
 view.save('tmp.png')

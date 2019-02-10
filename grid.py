@@ -1,6 +1,5 @@
-from abc import ABC, abstractmethod
 from math import cos, pi, sin
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, List, Tuple, NamedTuple, Set, Dict
 
 
 class Vector(NamedTuple):
@@ -34,9 +33,13 @@ class Point:
         self.y = y
         self.z = z
         self.locked = False
+        self.connections: List[Point] = []
 
     def pos(self) -> Tuple[int, int]:
         return self.x, self.y
+
+    def connect(self, point: 'Point') -> None:
+        self.connections.append(point)
 
     def move(self, vector: Vector) -> None:
         if self.locked:
@@ -45,9 +48,6 @@ class Point:
         self.x += vector.x
         self.y += vector.y
         self.z += vector.z
-
-    def lock(self) -> None:
-        self.locked = True
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Point):
@@ -65,113 +65,105 @@ class Point:
         return '<Point: %d,%d,%d>' % (self.x, self.y, self.z)
 
 
-class Cell:
+class Points(dict):
 
-    @classmethod
-    def hex(cls, x: int, y: int, r: int) -> 'Cell':
+    def add(self, point: Point) -> None:
+        self[point] = point
+
+
+class Grid:
+
+    def __init__(self, width: int, height: int, density: int) -> None:
+        self.__width = width
+        self.__height = height
+        self.__density = density
+
+        self.__points = Points()
+
+        center = Point(self.width // 2, self.height // 2, 0)
+        self.__points.add(center)
+        self.__populate(center)
+
+    @property
+    def width(self) -> int:
+        return self.__width * self.__density
+
+    @property
+    def height(self) -> int:
+        return self.__height * self.__density
+
+    @property
+    def points(self) -> List[Point]:
+        return list(self.__points.values())
+
+    def __populate(self, center: Point) -> None:
+        centers = [center]
+        while centers:
+            center = centers.pop(0)
+            for point in self.__produce(center):
+                if not self.__is_in_grid(point):
+                    continue
+
+                if point not in self.__points:
+                    self.__points.add(point)
+                    centers.append(point)
+
+                center.connect(self.__points.get(point))
+
+    def __is_in_grid(self, point: Point) -> bool:
+        if point.x < -self.__density or point.x > self.width + self.__density:
+            return False
+        if point.y < -self.__density or point.y > self.height + self.__density:
+            return False
+        return True
+
+    def __produce(self, center: Point) -> List[Point]:
         sides = 6
         angle = 2 * pi / sides
-        edges = [
+
+        return [
             Point(
-                round(x + r * sin(i * angle)),
-                round(y + r * cos(i * angle))
+                round(center.x + self.__density * sin(i * angle)),
+                round(center.y + self.__density * cos(i * angle))
             )
             for i in range(sides)
         ]
 
-        return cls(
-            Point(x, y),
-            edges
-        )
+    def drag(self, point: Point, vector: Vector) -> None:
+        self.__follow([point], vector, set())
 
-    def __init__(self, center: Point, points: List[Point]) -> None:
-        self.center = center
-        self.points = points
-        self.connections: List[Cell] = []
-
-    def __repr__(self) -> str:
-        return '<Cell: %s>' % ",".join([
-            str(point.pos())
-            for point in self.points
-        ])
-
-    @property
-    def width(self) -> int:
-        x = [point.x for point in self.points]
-        return max(x) - min(x)
-
-    @property
-    def height(self) -> int:
-        y = [point.y for point in self.points]
-        return max(y) - min(y)
-
-    def connect(self, cell: 'Cell') -> None:
-        self.connections.append(cell)
-
-    def copy(self, x, y) -> 'Cell':
-        return Cell(
-            Point(x, y),
-            [
-                Point(point.x + x, point.y + y)
-                for point in self.points
-            ]
-        )
-
-    def drag(self, vector: Vector) -> None:
-        self.__drag_cell([self], vector, [])
-
-    def __drag_cell(
-            self,
-            cells: List['Cell'],
-            vector: Vector,
-            affected: List[Point],
-    ) -> None:
+    def __follow(self, points: List[Point], vector: Vector,
+                 affected: Set[Point]) -> None:
         if vector.f <= 1:
             return
 
-        for cell in cells:
-            if cell.center in affected:
-                continue
+        for point in points:
+            if point not in affected:
+                point.move(vector)
+                affected.add(point)
 
-            cell.center.move(vector)
-            affected.append(cell.center)
+        peaking: Dict[Point, Vector] = {}
+        for point in points:
+            for connection in point.connections:
+                peaking[connection] = self.__peak(
+                    vector // 2,
+                    connection,
+                    point
+                )
 
-            drags: List[Vector] = []
-            for point in cell.points:
-                drag = vector
-                drag = self.__stretch(drag, point, cell.center)
-                drag = self.__peak(drag, point, cell.center)
-                drags.append(drag)
+        for point, peak in peaking.items():
+            if point not in affected:
+                point.move(peak)
+                affected.add(point)
 
-            for i, point in enumerate(cell.points):
-                if point in affected:
-                    continue
-
-                point.move(drags[i])
-                affected.append(point)
-
-        self.__drag_cell(
+        self.__follow(
             [
                 connection
-                for cell in cells
-                for connection in cell.connections
+                for point in points
+                for connection in point.connections
             ],
             vector // 2,
-            affected,
-        )
-
-    def __stretch(self, vector: Vector, point: Point, center: Point) -> Vector:
-        def calc(vector: int, point: int, center: int) -> int:
-            if point < center:
-                return round(vector * 0.5)
-            if point == center:
-                return round(vector * 0.8)
-            return vector
-
-        return Vector(
-            calc(vector.x, point.x, center.x),
-            calc(vector.y, point.y, center.y),
-            vector.z
+            affected
         )
 
     def __peak(self, vector: Vector, point: Point, center: Point) -> Vector:
@@ -182,119 +174,11 @@ class Cell:
             ox = abs(vector.z) * (-1 if point.x > center.x else 1)
             oy = abs(vector.z // 2) * (-1 if point.y > center.y else 1)
 
-        if ox > self.width:
-            ox = 0
-        if oy > self.height:
-            oy = 0
+        ox = ox * 100 // self.__density // 2
+        oy = oy * 100 // self.__density // 2
 
         return Vector(
-            vector.x + ox,  # TODO - make it proportional
-            vector.y + oy,  # TODO - make it proportional
+            vector.x + min(ox, self.__density),
+            vector.y + min(oy, self.__density),
             vector.z
         )
-
-
-class Shake(ABC):
-
-    @abstractmethod
-    def apply(self, cells: Dict[Point, Cell]) -> None:
-        ...
-
-
-class Grid:
-
-    def __init__(self, width: int, height: int, density: int) -> None:
-        self.__width = width
-        self.__height = height
-        self.__density = density
-
-        self.__cells: Dict[Point, Cell] = {}
-
-        self.__cell: Cell = Cell.hex(0, 0, self.__density)
-        self.__populate()
-        self.__lock()
-        self.__connect()
-
-    @property
-    def width(self) -> int:
-        return self.__width * self.__cell.width - self.__cell.width // 2
-
-    @property
-    def height(self) -> int:
-        return self.__height * round(self.__cell.height * 0.6)
-
-    @property
-    def cells(self) -> List[Cell]:
-        return list(self.__cells.values())
-
-    def __populate(self) -> None:
-        points: Dict[Point, Point] = {}
-        x = 0
-        y = 0
-        offset = False
-
-        for j in range(self.__height):
-            for i in range(self.__width):
-                cell = self.__cell.copy(x, y)
-                self.__append(cell, points)
-                x += cell.width
-
-            offset = not offset
-            y += self.__cell.height * 0.75
-            x = self.__cell.width // 2 if offset else 0
-
-    def __append(self, cell: Cell, points: Dict[Point, Point]) -> None:
-        for i, point in enumerate(cell.points):
-            try:
-                cell.points[i] = points[point]
-            except KeyError:
-                points[point] = point
-
-        self.__cells[cell.center] = cell
-
-    def __lock(self) -> None:
-        for cell in self.__cells.values():
-            for point in cell.points:
-                if any([
-                    point.x <= 0,
-                    point.x >= self.width,
-                    point.y <= 0,
-                    point.y >= self.width
-                ]):
-                    point.lock()
-
-    def __connect(self) -> None:
-        for center, cell in self.__cells.items():
-            points = [
-                Point(
-                    center.x - cell.width,
-                    center.y
-                ),
-                Point(
-                    center.x + cell.width,
-                    center.y
-                ),
-                Point(
-                    center.x - cell.width // 2,
-                    center.y - round(cell.height * 0.75)
-                ),
-                Point(
-                    center.x - cell.width // 2,
-                    center.y + round(cell.height * 0.75)
-                ),
-                Point(
-                    center.x + cell.width // 2,
-                    center.y - round(cell.height * 0.75)
-                ),
-                Point(
-                    center.x + cell.width // 2,
-                    center.y + round(cell.height * 0.75)
-                ),
-            ]
-            for point in points:
-                connection = self.__cells.get(point)
-                if connection:
-                    cell.connect(connection)
-
-    def apply(self, shake: Shake) -> None:
-        shake.apply(self.__cells)
